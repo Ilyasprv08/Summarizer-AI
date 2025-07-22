@@ -1,11 +1,28 @@
 fastapi
 uvicorn[standard]
+
+# Whisper & faster-whisper
 openai
 whisper
+faster-whisper
+torch  # Required by whisper and faster-whisper
+
+# YouTube & feed handling
 yt-dlp
-beautifulsoup4
 feedparser
+
+# HTML scraping
+beautifulsoup4
+requests
+certifi  # For SSL certificates
+
+# Document parsing
 python-docx
-PyMuPDF
-python-multipart
+PyMuPDF  # `fitz` is the PyMuPDF module
+
+# File uploads & env
+python-multipart  # Needed by FastAPI to support file uploads
 python-dotenv
+
+# Optional but recommended
+pydantic
