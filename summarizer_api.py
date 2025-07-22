@@ -1,5 +1,5 @@
 # summarizer_api.py
-from fastapi import FastAPI, Query, HTTPException, UploadFile, File
+from fastapi import FastAPI, Query, HTTPException, UploadFile, File, Request, Depends
 from pydantic import BaseModel
 import feedparser
 import urllib.request
@@ -31,7 +31,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 class SummarizeRequest(BaseModel):
     url: str
@@ -77,7 +76,7 @@ def parse_feed_with_headers(url):
          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     })
 
-@app.post("/summarize-podcast", summary="Summarize a podcast episode from RSS feed", description="Takes a podcast RSS feed URL and returns a summary of the latest episode.")
+#@app.post("/summarize-podcast", summary="Summarize a podcast episode from RSS feed", description="Takes a podcast RSS feed URL and returns a summary of the latest episode.")
 def summarize_podcast(request: PodcastRequest):
     rss_url = request.rss_url
     depth = request.depth
@@ -295,7 +294,7 @@ def summarize_text(text, depth):
 Summarize the following content at a {depth} level. Only return the summary. No commentary.
 
 Content:
-{text[:3000]}  # limit to first 3000 characters for safety
+{text}  # limit to first 3000 characters for safety
 """
     headers = {
         "Authorization": f"Bearer {API_KEY}",  # your Mistral API key
