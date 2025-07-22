@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+openai
+whisper
+yt-dlp
+beautifulsoup4
+feedparser
+python-docx
+PyMuPDF
+python-multipart
+python-dotenv
