@@ -15,12 +15,21 @@ import re
 import certifi
 import ssl
 import fitz 
+import uuid
+import json
+import threading
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import docx
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables from .env file
 API_KEY = os.environ.get("MISTRAL_API_KEY")
+SESSION_COOKIES = {}  # Store session cookies for YouTube login
 
 app = FastAPI(title="Universal Content Summarizer API")
 
@@ -35,10 +44,16 @@ app.add_middleware(
 class SummarizeRequest(BaseModel):
     url: str
     depth: str = "medium"  # options: "short", "medium", "detailed"
+    #session_id: str = None  # For YouTube login session tracking
 
 class PodcastRequest(BaseModel):
     rss_url: str
     depth: str = "medium"  # options: "short", "medium", "detailed"
+
+@app.get("/ping")
+def ping():
+    return {"status":"ok"}
+
 
 @app.post("/summarize-url", summary="Summarize a webpage or YouTube video", description="Takes a YouTube or article URL and returns a summary.")
 def summarize_url(request: SummarizeRequest):
@@ -235,27 +250,45 @@ def extract_playlist_video_urls(playlist_url):
             return []
         
 def transcribe_youtube(video_url):
-    with tempfile.TemporaryDirectory() as tmpdir:
+     def try_transcribe(ydl_opts):
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+            for file in os.listdir(tmpdir):
+                if file.endswith((".webm", ".m4a", ".mp3", ".opus")):
+                    return os.path.join(tmpdir, file)
+            raise Exception("No audio file downloaded")
+        
+     with tempfile.TemporaryDirectory() as tmpdir:
         ssl_context = ssl.create_default_context(cafile=certifi.where())
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': os.path.join(tmpdir, 'audio.%(ext)s'),
-            'quiet': True,
-            'nocheckcertificate': False,
-        }
         import urllib.request
         https_handler = urllib.request.HTTPSHandler(context=ssl_context)
         opener = urllib.request.build_opener(https_handler)
         urllib.request.install_opener(opener)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=True)
-            downloaded_file = None
-            for file in os.listdir(tmpdir):
-               if file.endswith(".webm") or file.endswith(".m4a") or file.endswith(".mp3") or file.endswith(".opus"):
-                    downloaded_file = os.path.join(tmpdir, file)
-                    break
-            if not downloaded_file:
-                  raise Exception("No audio file downloaded from YouTube")
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': os.path.join(tmpdir, 'audio.%(ext)s'),
+            'quiet': True,
+            'nocheckcertificate': False
+            }
+        try:
+            downloaded_file = try_transcribe(ydl_opts)
+        except Exception as public_error:
+            try:
+                cookie_path = os.path.join(os.path.dirname(__file__), 'youtube_cookies.txt')
+                ydl_opts['cookiefile'] = cookie_path
+                downloaded_file = try_transcribe(ydl_opts)
+            except Exception as private_error:
+                raise Exception(f"Failed to download audio: {public_error} | With cookies: {private_error}")
+
+      #   with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+      #       info = ydl.extract_info(video_url, download=True)
+      #       downloaded_file = None
+      #       for file in os.listdir(tmpdir):
+      #          if file.endswith(".webm") or file.endswith(".m4a") or file.endswith(".mp3") or file.endswith(".opus"):
+      #               downloaded_file = os.path.join(tmpdir, file)
+      #               break
+      #       if not downloaded_file:
+      #             raise Exception("No audio file downloaded from YouTube")
             
         model = whisper.load_model("base")
         result = model.transcribe(downloaded_file)
