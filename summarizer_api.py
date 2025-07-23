@@ -1,5 +1,5 @@
 # summarizer_api.py
-from fastapi import FastAPI, Query, HTTPException, UploadFile, File, Request, Depends
+from fastapi import FastAPI, Form, Query, HTTPException, UploadFile, File, Request, Depends
 from pydantic import BaseModel
 import feedparser
 import urllib.request
@@ -56,9 +56,9 @@ def ping():
 
 
 @app.post("/summarize-url", summary="Summarize a webpage or YouTube video", description="Takes a YouTube or article URL and returns a summary.")
-def summarize_url(request: SummarizeRequest):
-    url = request.url
-    depth = request.depth
+def summarize_url(url: str = Form(...), depth: str = Form(...)):
+    #url = request.url
+    #depth = request.depth
 
     if "youtube.com" in url or "youtu.be" in url:
         try:
