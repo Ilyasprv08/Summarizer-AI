@@ -301,9 +301,13 @@ def transcribe_youtube(video_url):
       #       if not downloaded_file:
       #             raise Exception("No audio file downloaded from YouTube")
             
-        model = whisper.load_model("base")
-        result = model.transcribe(downloaded_file)
-        return result['text']
+      #   model = whisper.load_model("base")
+      #   result = model.transcribe(downloaded_file)
+      #   return result['text']
+        model = WhisperModel("base", device="cpu")
+        segments, _ = model.transcribe(downloaded_file)
+        text = " ".join([segment.text for segment in segments])
+        return text
 
 def extract_article_text(article_url):
     headers = {
