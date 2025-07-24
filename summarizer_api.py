@@ -250,64 +250,104 @@ def extract_playlist_video_urls(playlist_url):
             return []
         
 def transcribe_youtube(video_url):
-     def try_transcribe(ydl_opts):
+    import urllib.request
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    https_handler = urllib.request.HTTPSHandler(context=ssl_context)
+    opener = urllib.request.build_opener(https_handler)
+    urllib.request.install_opener(opener)
+
+    def try_transcribe(ydl_opts):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
             for file in os.listdir(tmpdir):
                 if file.endswith((".webm", ".m4a", ".mp3", ".opus")):
                     return os.path.join(tmpdir, file)
             raise Exception("No audio file downloaded")
-        
-     with tempfile.TemporaryDirectory() as tmpdir:
-        ssl_context = ssl.create_default_context(cafile=certifi.where())
-        import urllib.request
-        https_handler = urllib.request.HTTPSHandler(context=ssl_context)
-        opener = urllib.request.build_opener(https_handler)
-        urllib.request.install_opener(opener)
 
-        cookie_path = os.path.join(os.path.dirname(__file__), COOKIE_FILE) 
-        use_cookies = os.path.exists(cookie_path)
+    # Step 1: Check metadata first to avoid restricted videos
+    with yt_dlp.YoutubeDL({'quiet': True, 'skip_download': True}) as ydl:
+        try:
+            info = ydl.extract_info(video_url, download=False)
+        except Exception as e:
+            raise Exception(f"Failed to fetch video info: {str(e)}")
+
+        if info.get('age_limit', 0) >= 18:
+            raise Exception("Video is age-restricted and requires login.")
+        if info.get('is_private'):
+            raise Exception("Video is private.")
+        if info.get('availability') == 'unavailable':
+            raise Exception("Video is unavailable.")
+        if info.get('live_status') == 'is_upcoming':
+            raise Exception("Video is not yet available (upcoming live stream).")
+        if info.get('live_status') == 'is_live':
+            raise Exception("Live videos are not supported.")
+
+    # Step 2: Download audio
+    with tempfile.TemporaryDirectory() as tmpdir:
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': os.path.join(tmpdir, 'audio.%(ext)s'),
             'quiet': True,
-            'nocheckcertificate': False
-            }
-        if use_cookies:
-            ydl_opts['cookiefile'] = cookie_path
+            'nocheckcertificate': False,
+            'noplaylist': True
+        }
 
         try:
             downloaded_file = try_transcribe(ydl_opts)
         except Exception as public_error:
             raise Exception(f"Failed to download audio: {public_error}")
-        
-      #   try:
-      #       downloaded_file = try_transcribe(ydl_opts)
-      #   except Exception as public_error:
-      #       try:
-      #           cookie_path = os.path.join(os.path.dirname(__file__), 'youtube_cookies.txt')
-      #           ydl_opts['cookiefile'] = cookie_path
-      #           downloaded_file = try_transcribe(ydl_opts)
-      #       except Exception as private_error:
-      #           raise Exception(f"Failed to download audio: {public_error} | With cookies: {private_error}")
 
-      #   with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-      #       info = ydl.extract_info(video_url, download=True)
-      #       downloaded_file = None
-      #       for file in os.listdir(tmpdir):
-      #          if file.endswith(".webm") or file.endswith(".m4a") or file.endswith(".mp3") or file.endswith(".opus"):
-      #               downloaded_file = os.path.join(tmpdir, file)
-      #               break
-      #       if not downloaded_file:
-      #             raise Exception("No audio file downloaded from YouTube")
-            
-      #   model = whisper.load_model("base")
-      #   result = model.transcribe(downloaded_file)
-      #   return result['text']
-        model = WhisperModel("base", device="cpu")
-        segments, _ = model.transcribe(downloaded_file)
-        text = " ".join([segment.text for segment in segments])
-        return text
+        # Step 3: Transcribe
+        model = whisper.load_model("base")
+        result = model.transcribe(downloaded_file)
+        return result['text']
+   #   def try_transcribe(ydl_opts):
+   #      with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+   #          ydl.download([video_url])
+   #          for file in os.listdir(tmpdir):
+   #              if file.endswith((".webm", ".m4a", ".mp3", ".opus")):
+   #                  return os.path.join(tmpdir, file)
+   #          raise Exception("No audio file downloaded")
+        
+   #   with yt_dlp.YoutubeDL({'quiet': True, 'skip_download': True}) as ydl:
+   #      info = ydl.extract_info(video_url, download=False)
+   #      if info.get('age_limit', 0) >= 18:
+   #          raise Exception("Video is age-restricted and cannot be accessed without login.")
+   #      if info.get('is_private'):
+   #          raise Exception("Video is private and cannot be accessed.")
+   #      if info.get('availability') == 'unavailable':
+   #          raise Exception("Video is unavailable.")
+   #      if info.get('live_status') == 'is_upcoming':
+   #          raise Exception("Live video is upcoming and not downloadable yet.")
+        
+   #   with tempfile.TemporaryDirectory() as tmpdir:
+   #      ssl_context = ssl.create_default_context(cafile=certifi.where())
+   #      import urllib.request
+   #      https_handler = urllib.request.HTTPSHandler(context=ssl_context)
+   #      opener = urllib.request.build_opener(https_handler)
+   #      urllib.request.install_opener(opener)
+
+   #      cookie_path = os.path.join(os.path.dirname(__file__), COOKIE_FILE) 
+   #      use_cookies = os.path.exists(cookie_path)
+   #      ydl_opts = {
+   #          'format': 'bestaudio/best',
+   #          'outtmpl': os.path.join(tmpdir, 'audio.%(ext)s'),
+   #          'quiet': True,
+   #          'nocheckcertificate': False
+   #          }
+   #      if use_cookies:
+   #          ydl_opts['cookiefile'] = cookie_path
+
+   #      try:
+   #          downloaded_file = try_transcribe(ydl_opts)
+   #      except Exception as public_error:
+   #          raise Exception(f"Failed to download audio: {public_error}")
+        
+
+   #      model = WhisperModel("base", device="cpu")
+   #      segments, _ = model.transcribe(downloaded_file)
+   #      text = " ".join([segment.text for segment in segments])
+   #      return text
 
 def extract_article_text(article_url):
     headers = {
