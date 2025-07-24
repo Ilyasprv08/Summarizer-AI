@@ -4,7 +4,6 @@ from pydantic import BaseModel
 import feedparser
 import urllib.request
 import requests
-import subprocess
 import os
 import tempfile
 import yt_dlp
@@ -15,14 +14,6 @@ import re
 import certifi
 import ssl
 import fitz 
-import uuid
-import json
-import threading
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 import docx
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
