@@ -17,7 +17,6 @@ import ssl
 import fitz 
 import uuid
 import json
-import browser_cookie3
 import threading
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
