@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables from .env file
 API_KEY = os.environ.get("MISTRAL_API_KEY")
-COOKIE_FILE = "youtube_cookies.txt"
+COOKIE_FILE = "/etc/secrets/youtube_cookies.txt"
 
 app = FastAPI(title="Universal Content Summarizer API")
 
@@ -45,7 +45,7 @@ class PodcastRequest(BaseModel):
 def ping():
     return {"status":"ok"}
 
-@app.post("/upload-cookies", summary="Upload YouTube cookies", description="Uploads a file containing YouTube cookies for authenticated access.")
+#@app.post("/upload-cookies", summary="Upload YouTube cookies", description="Uploads a file containing YouTube cookies for authenticated access.")
 async def upload_cookies(file: UploadFile = File(...)):
    if not file.filename.endswith(".txt"):
          raise HTTPException(status_code=400, detail="Invalid file type. Please upload a .txt file.")
@@ -289,7 +289,8 @@ def transcribe_youtube(video_url):
             'outtmpl': os.path.join(tmpdir, 'audio.%(ext)s'),
             'quiet': True,
             'nocheckcertificate': False,
-            'noplaylist': True
+            'noplaylist': True,
+            'cookiefile': COOKIE_FILE
         }
 
         try:
