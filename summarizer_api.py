@@ -1,4 +1,6 @@
 # summarizer_api.py
+import logging
+import time
 from fastapi import FastAPI, Form, Query, HTTPException, UploadFile, File, Request
 from pydantic import BaseModel
 import feedparser
@@ -16,6 +18,10 @@ import fitz
 import docx
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 load_dotenv()  # Load environment variables from .env file
 API_KEY = os.environ.get("MISTRAL_API_KEY")
@@ -50,8 +56,11 @@ def summarize_url(request: SummarizeRequest):
 
     if "youtube.com" in url or "youtu.be" in url:
         try:
+            start_time = time.time()
             text = transcribe_youtube(url)
+            logger.info(f"Transcription completed in {time.time() - start_time:.2f} seconds")
         except Exception as e:
+            logger.error(f"YouTube transcription failed: {str(e)}")
             raise HTTPException(status_code=500, detail=f"YouTube transcription failed: {str(e)}")
         source_type = "YouTube"
 
@@ -243,48 +252,61 @@ def transcribe_youtube(video_url):
 
     # Verify cookie file exists
     if not os.path.exists(COOKIE_FILE):
+        logger.error(f"YouTube cookie file not found at: {COOKIE_FILE}")
         raise Exception(f"Required YouTube cookie file not found at: {COOKIE_FILE}")
 
-    # Check video metadata first
-    with yt_dlp.YoutubeDL({
-        'quiet': True,
-        'skip_download': True,
-        'cookiefile': COOKIE_FILE
-    }) as ydl:
-        try:
-            info = ydl.extract_info(video_url, download=False)
-        except Exception as e:
-            raise Exception(f"Failed to fetch video info: {str(e)}")
-
-    # Download audio using cookies
     with tempfile.TemporaryDirectory() as tmpdir:
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': os.path.join(tmpdir, 'audio.%(ext)s'),
             'quiet': True,
-            'nocheckcertificate': False,
+            'nocheckcertificate': True,  # Faster without cert verification
             'noplaylist': True,
-            'cookiefile': COOKIE_FILE
+            'cookiefile': COOKIE_FILE,
+            'socket_timeout': 30,        # Timeout settings
+            'retries': 3,                # Retry settings
+            'fragment_retries': 3,
+            'skip_unavailable_fragments': True,
+            'max_filesize': 50 * 1024 * 1024,  # Limit to 50MB
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }]
         }
 
         try:
+            logger.info(f"Downloading YouTube video: {video_url}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([video_url])
+                info_dict = ydl.extract_info(video_url, download=True)
+                audio_file = ydl.prepare_filename(info_dict).replace('.webm', '.mp3').replace('.m4a', '.mp3')
                 
-                # Find downloaded audio file
-                for file in os.listdir(tmpdir):
-                    if file.endswith((".webm", ".m4a", ".mp3", ".opus")):
-                        audio_file = os.path.join(tmpdir, file)
-                        break
-                else:
-                    raise Exception("No audio file downloaded")
+                if not os.path.exists(audio_file):
+                    # Fallback: find any audio file
+                    for file in os.listdir(tmpdir):
+                        if file.endswith((".mp3", ".wav", ".ogg")):
+                            audio_file = os.path.join(tmpdir, file)
+                            break
+                    else:
+                        raise Exception("No audio file downloaded after conversion")
         except Exception as e:
+            logger.error(f"Failed to download audio: {str(e)}")
             raise Exception(f"Failed to download audio: {str(e)}")
 
-        # Transcribe audio
-        model = whisper.load_model("base")
-        result = model.transcribe(audio_file)
-        return result['text']
+        # Transcribe audio - optimized for memory usage
+        try:
+            logger.info(f"Transcribing audio file: {audio_file}")
+            # Use the smallest model to reduce memory usage
+            model = whisper.load_model("tiny")
+            result = model.transcribe(
+                audio_file, 
+                fp16=False,  # Disable FP16 to avoid GPU requirements
+                verbose=False  # Disable progress messages
+            )
+            return result['text']
+        except Exception as e:
+            logger.error(f"Transcription failed: {str(e)}")
+            raise Exception(f"Transcription failed: {str(e)}")
 
 def extract_article_text(article_url):
     headers = {
@@ -339,10 +361,14 @@ Content:
         "max_tokens": 800
     }
 
-    response = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=data)
-
-    if response.status_code == 200:
+    try:
+        response = requests.post("https://api.mistral.ai/v1/chat/completions", 
+                                headers=headers, 
+                                json=data,
+                                timeout=30)  # Add timeout
+        response.raise_for_status()
         result = response.json()
         return result["choices"][0]["message"]["content"].strip()
-    else:
-        raise Exception(f"Mistral API error: {response.status_code} - {response.text}")
+    except Exception as e:
+        logger.error(f"Mistral API error: {str(e)}")
+        raise Exception(f"Summary generation failed: {str(e)}")
