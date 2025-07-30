@@ -1,5 +1,5 @@
 # summarizer_api.py
-from fastapi import FastAPI, Form, Query, HTTPException, UploadFile, File, Request, Depends
+from fastapi import FastAPI, Form, Query, HTTPException, UploadFile, File, Request
 from pydantic import BaseModel
 import feedparser
 import urllib.request
@@ -7,7 +7,6 @@ import requests
 import os
 import tempfile
 import yt_dlp
-from faster_whisper import WhisperModel
 import whisper
 from bs4 import BeautifulSoup
 import re
@@ -20,7 +19,7 @@ from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables from .env file
 API_KEY = os.environ.get("MISTRAL_API_KEY")
-COOKIE_FILE = "/etc/secrets/youtube_cookies.txt"
+COOKIE_FILE = "/etc/secrets/youtube_cookies.txt"  # Fixed cookie file location
 
 app = FastAPI(title="Universal Content Summarizer API")
 
@@ -35,7 +34,6 @@ app.add_middleware(
 class SummarizeRequest(BaseModel):
     url: str
     depth: str = "medium"  # options: "short", "medium", "detailed"
-    #session_id: str = None  # For YouTube login session tracking
 
 class PodcastRequest(BaseModel):
     rss_url: str
@@ -45,20 +43,10 @@ class PodcastRequest(BaseModel):
 def ping():
     return {"status":"ok"}
 
-#@app.post("/upload-cookies", summary="Upload YouTube cookies", description="Uploads a file containing YouTube cookies for authenticated access.")
-async def upload_cookies(file: UploadFile = File(...)):
-   if not file.filename.endswith(".txt"):
-         raise HTTPException(status_code=400, detail="Invalid file type. Please upload a .txt file.")
-   with open(COOKIE_FILE, "wb") as f:
-       content = await file.read()
-       f.write(content)
-   return {"status": "success", "message": "Cookies uploaded successfully"}
-
 @app.post("/summarize-url", summary="Summarize a webpage or YouTube video", description="Takes a YouTube or article URL and returns a summary.")
 def summarize_url(request: SummarizeRequest):
     url = request.url
     depth = request.depth
-    #session_id = request.session_id
 
     if "youtube.com" in url or "youtu.be" in url:
         try:
@@ -91,7 +79,7 @@ def parse_feed_with_headers(url):
          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     })
 
-#@app.post("/summarize-podcast", summary="Summarize a podcast episode from RSS feed", description="Takes a podcast RSS feed URL and returns a summary of the latest episode.")
+@app.post("/summarize-podcast", summary="Summarize a podcast episode from RSS feed", description="Takes a podcast RSS feed URL and returns a summary of the latest episode.")
 def summarize_podcast(request: PodcastRequest):
     rss_url = request.rss_url
     depth = request.depth
@@ -121,9 +109,6 @@ def summarize_podcast(request: PodcastRequest):
 
         model = whisper.load_model("base")
         result = model.transcribe(audio_file_path)
-        #model = WhisperModel("base", device="cpu")
-        #segments, _ = model.transcribe(audio_file_path)
-        #text = " ".join([segment.text for segment in segments])
         text = result['text']
 
         summary = summarize_text(text, depth)
@@ -248,29 +233,30 @@ def extract_playlist_video_urls(playlist_url):
             return [entry['url'] for entry in result['entries']]
         else:
             return []
-        
+
 def transcribe_youtube(video_url):
-    import urllib.request
+    # Create SSL context for secure connections
     ssl_context = ssl.create_default_context(cafile=certifi.where())
     https_handler = urllib.request.HTTPSHandler(context=ssl_context)
     opener = urllib.request.build_opener(https_handler)
     urllib.request.install_opener(opener)
 
+    # Verify cookie file exists
     if not os.path.exists(COOKIE_FILE):
-        raise Exception(f"Cookie file not found: {COOKIE_FILE}")
+        raise Exception(f"Required YouTube cookie file not found at: {COOKIE_FILE}")
 
-    # Step 1: Check metadata
+    # Check video metadata first
     with yt_dlp.YoutubeDL({
         'quiet': True,
         'skip_download': True,
         'cookiefile': COOKIE_FILE
     }) as ydl:
         try:
-            ydl.extract_info(video_url, download=False)
+            info = ydl.extract_info(video_url, download=False)
         except Exception as e:
             raise Exception(f"Failed to fetch video info: {str(e)}")
 
-    # Step 2: Download and transcribe
+    # Download audio using cookies
     with tempfile.TemporaryDirectory() as tmpdir:
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -281,20 +267,21 @@ def transcribe_youtube(video_url):
             'cookiefile': COOKIE_FILE
         }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([video_url])
+                
+                # Find downloaded audio file
+                for file in os.listdir(tmpdir):
+                    if file.endswith((".webm", ".m4a", ".mp3", ".opus")):
+                        audio_file = os.path.join(tmpdir, file)
+                        break
+                else:
+                    raise Exception("No audio file downloaded")
+        except Exception as e:
+            raise Exception(f"Failed to download audio: {str(e)}")
 
-        # Find downloaded audio file
-        audio_file = None
-        for f in os.listdir(tmpdir):
-            if f.endswith((".webm", ".m4a", ".mp3", ".opus")):
-                audio_file = os.path.join(tmpdir, f)
-                break
-
-        if not audio_file:
-            raise Exception("No audio file found after download.")
-
-        # Transcribe
+        # Transcribe audio
         model = whisper.load_model("base")
         result = model.transcribe(audio_file)
         return result['text']
@@ -307,7 +294,7 @@ def extract_article_text(article_url):
     response.raise_for_status()
     soup = BeautifulSoup(response.text, 'html.parser')
 
-    # Remove script and style
+    # Remove unwanted tags
     for tag in soup(['script', 'style', "noscript", "iframe", "footer", "header", "nav", "form", "aside"]):
         tag.decompose()
 
@@ -315,7 +302,7 @@ def extract_article_text(article_url):
     if article_tag:
         text = article_tag.get_text(separator=' ', strip=True)
     else:
-        # Fallback: collect largest visible <div> or <p> text block
+        # Fallback: collect largest text blocks
         candidates = sorted(
             soup.find_all(['div', 'p']),
             key=lambda tag: len(tag.get_text(strip=True)),
@@ -323,24 +310,28 @@ def extract_article_text(article_url):
         )
         text = ' '.join([c.get_text(separator=' ', strip=True) for c in candidates[:5]])
 
-    # Cleanup excessive whitespace
+    # Cleanup whitespace
     return re.sub(r'\s+', ' ', text).strip()
 
 def summarize_text(text, depth):
+    # Limit text length for efficiency
+    if len(text) > 3000:
+        text = text[:3000] + " [truncated]"
+    
     prompt = f"""
     You are a multilingual summarization expert.
 Summarize the following content at a {depth} level. Only return the summary. No commentary.
 
 Content:
-{text}  # limit to first 3000 characters for safety
+{text}
 """
     headers = {
-        "Authorization": f"Bearer {API_KEY}",  # your Mistral API key
+        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
 
     data = {
-        "model": "open-mixtral-8x7b",  # or your preferred model
+        "model": "open-mixtral-8x7b",
         "messages": [
             {"role": "user", "content": prompt}
         ],
