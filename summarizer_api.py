@@ -263,24 +263,28 @@ def transcribe_youtube(video_url):
                 if file.endswith((".webm", ".m4a", ".mp3", ".opus")):
                     return os.path.join(tmpdir, file)
             raise Exception("No audio file downloaded")
+        
+    if not os.path.exists(COOKIE_FILE):
+        raise Exception(f"Cookie file not found: {COOKIE_FILE}. Please upload your YouTube cookies.")
 
     # Step 1: Check metadata first to avoid restricted videos
-    with yt_dlp.YoutubeDL({'quiet': True, 'skip_download': True}) as ydl:
-        try:
-            info = ydl.extract_info(video_url, download=False)
-        except Exception as e:
-            raise Exception(f"Failed to fetch video info: {str(e)}")
+    with yt_dlp.YoutubeDL({'quiet': True, 'skip_download': True, 'cookiefile': COOKIE_FILE}) as ydl:
+        info = ydl.extract_info(video_url, download=False)
+      #   try:
+      #       info = ydl.extract_info(video_url, download=False)
+      #   except Exception as e:
+      #       raise Exception(f"Failed to fetch video info: {str(e)}")
 
-        if info.get('age_limit', 0) >= 18:
-            raise Exception("Video is age-restricted and requires login.")
-        if info.get('is_private'):
-            raise Exception("Video is private.")
-        if info.get('availability') == 'unavailable':
-            raise Exception("Video is unavailable.")
-        if info.get('live_status') == 'is_upcoming':
-            raise Exception("Video is not yet available (upcoming live stream).")
-        if info.get('live_status') == 'is_live':
-            raise Exception("Live videos are not supported.")
+      #   if info.get('age_limit', 0) >= 18:
+      #       raise Exception("Video is age-restricted and requires login.")
+      #   if info.get('is_private'):
+      #       raise Exception("Video is private.")
+      #   if info.get('availability') == 'unavailable':
+      #       raise Exception("Video is unavailable.")
+      #   if info.get('live_status') == 'is_upcoming':
+      #       raise Exception("Video is not yet available (upcoming live stream).")
+      #   if info.get('live_status') == 'is_live':
+      #       raise Exception("Live videos are not supported.")
 
     # Step 2: Download audio
     with tempfile.TemporaryDirectory() as tmpdir:
